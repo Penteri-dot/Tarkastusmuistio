@@ -1,0 +1,6 @@
+test/core.built.js
+test/imgs.json
+test/out/
+test/shots/
+test/photo.jpg
+__pycache__/
