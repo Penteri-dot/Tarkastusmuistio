@@ -66,4 +66,24 @@ ok(KT.hasContent(k), "has content");
 // kmu-tuonti
 const kmu = { muoto: "kmu-muistio", versio: 1, muistio: { id: "abc", meta: { osoite: "Testi 1" }, osat: { lahto: { text: "L", photos: [], captions: [] }, iv: { tyyppi: "Painovoimainen" } }, havainnot: [{ title: "H", text: "t", sub: [] }], coverPhotos: [], mittaukset: { ilma: [{ paikka: "Ulko", t: "1", rh: "80" }] } } };
 const ki = KT.importJson(kmu); ok(ki.osat.lahto.text === "L" && ki.iv.tyyppi === "Painovoimainen" && ki.havainnot[0].title === "H", "kmu import");
+// Siivous: viallinen tai pahantahtoinen varmuuskopio
+const evil = { muoto: "tarkastusmuistio", versio: 1, tarkastus: { id: 'x" onclick="alert(1)', tyyppi: "constructor", meta: { osoite: { a: 1 } },
+  cover: { photos: ['x" onerror="alert(1)', I.a], captions: ["huono", "hyvä"] }, havainnot: [{ id: "<script>", title: 5, sub: "x", photos: "y" }, null],
+  lista: { 'k0-0': { tila: "hax" }, 'bad"key': { tila: "ok" } }, mittaukset: { ilma: "x", korkeus: [{ paikka: { x: 1 }, lattia: 12 }, 7] }, sign: { a: { img: "javascript:1", name: [] } } } };
+const ev = KT.importJson(evil);
+ok(/^[a-z0-9]+$/.test(ev.id) && ev.tyyppi === "kunto" && ev.meta.osoite === "", "sanitize id/type/meta");
+ok(ev.cover.photos.length === 1 && ev.cover.captions[0] === "hyvä", "sanitize photos");
+ok(ev.havainnot.length === 1 && ev.havainnot[0].title === "5" && ev.havainnot[0].sub.length === 0 && /^[a-z0-9]+$/.test(ev.havainnot[0].id), "sanitize hav");
+ok(ev.lista["k0-0"].tila === "" && !ev.lista['bad"key'], "sanitize lista");
+ok(ev.mittaukset.ilma.length === 2 && ev.mittaukset.korkeus.length === 1 && ev.mittaukset.korkeus[0].lattia === "12" && ev.mittaukset.korkeus[0].paikka === "", "sanitize meas");
+ok(ev.sign.a.img === null && ev.sign.a.name === "", "sanitize sign");
+KT.buildPdf(KT.buildReport(ev)); KT.buildDocx(KT.buildReport(ev));
+let threw = 0; for(const bad of [null, 5, {}, { muoto: "tarkastusmuistio", versio: 2, tarkastus: {} }, { muoto: "tarkastusmuistio", tarkastus: "x" }, { muoto: "kmu-muistio", muistio: 3 }]){ try { KT.importJson(bad); } catch(e){ threw++; } }
+ok(threw === 6, "bad imports rejected " + threw);
+ok(KT.money("1 500") === 1500 && KT.money("1500,50 €") === 1500.5 && isNaN(KT.money("1500–2000")) && isNaN(KT.money("noin 500")), "money");
+// Pitkä sisällysluettelo: 120 havaintoa -> kaikki otsikot mahtuvat luetteloon
+const big = KT.fresh("kunto", {}); big.meta.osoite = "Pitkä 1"; big.havainnot = [];
+for(let n = 0; n < 120; n++){ const h = KT.blankHav(); h.title = "Havainto numero " + n; h.text = "x"; big.havainnot.push(h); }
+const bigPdf = Buffer.from(KT.buildPdf(KT.buildReport(big))); fs.writeFileSync(path.join(out, "big.pdf"), bigPdf);
+ok(bigPdf.toString("latin1").includes("1.120 Havainto numero 119"), "toc holds all entries");
 console.log(fails ? fails + " FAIL" : "ALL OK");

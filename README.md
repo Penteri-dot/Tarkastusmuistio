@@ -42,6 +42,6 @@ node test/run.js          # tekee esimerkkiraportit kansioon test/out/
 
 ## Käyttöönotto puhelimessa
 
-Repo on julkinen ilman GitHub Pagesia. Jos haluat sovelluksen omaan osoitteeseen, ota käyttöön *Settings → Pages → Deploy from branch → main / root*, jolloin osoite on `https://penteri-dot.github.io/tarkastusmuistio/`.
+Repo on julkinen ilman GitHub Pagesia. Jos haluat sovelluksen omaan osoitteeseen, ota käyttöön *Settings → Pages → Deploy from branch → main / root*, jolloin osoite on `https://penteri-dot.github.io/Tarkastusmuistio/`.
 
 Toteutus on itsenäinen uudelleenkirjoitus, jonka toiminnallisuus on saanut innoituksen Ins. tsto Kärkimaa Oy:n Kuntotarkastusmuistiosta.

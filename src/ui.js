@@ -36,10 +36,25 @@
     return new Promise(function(res){
       try {
         var tx = idb.transaction("kv", "readwrite");
-        tx.objectStore("kv").put(val === null ? null : JSON.parse(JSON.stringify(val)), key);
+        tx.objectStore("kv").put(val, key);
         tx.oncomplete = function(){ res(true); };
         tx.onerror = tx.onabort = function(){ storageFail(tx.error); res(false); };
       } catch(e){ storageFail(e); res(false); }
+    });
+  }
+
+  function dbDel(key){
+    if(!idb){ try { localStorage.removeItem("tm_" + key); } catch(e){} return Promise.resolve(true); }
+    return new Promise(function(res){
+      try { var tx = idb.transaction("kv", "readwrite"); tx.objectStore("kv").delete(key); tx.oncomplete = function(){ res(true); }; tx.onerror = tx.onabort = function(){ res(false); }; }
+      catch(e){ res(false); }
+    });
+  }
+  function dbKeys(){
+    if(!idb){ try { return Promise.resolve(Object.keys(localStorage).filter(function(k){ return k.indexOf("tm_") === 0; }).map(function(k){ return k.slice(3); })); } catch(e){ return Promise.resolve([]); } }
+    return new Promise(function(res){
+      try { var rq = idb.transaction("kv", "readonly").objectStore("kv").getAllKeys(); rq.onsuccess = function(){ res(rq.result || []); }; rq.onerror = function(){ res([]); }; }
+      catch(e){ res([]); }
     });
   }
 
@@ -48,7 +63,14 @@
   function saveCur(){ clearTimeout(timer); timer = null; return dbSet("current", state.cur); }
   function saveSoon(){ clearTimeout(timer); timer = setTimeout(saveCur, 400); }
   function flush(){ if(timer) saveCur(); }
-  function saveHistory(){ return dbSet("history", state.history); }
+  /* Jokainen raportti omalla avaimellaan, jotta tallennus ei kirjoita kaikkia raportteja kuvineen uudelleen */
+  function saveRep(r){ return dbSet("r:" + r.id, r); }
+  function delRep(id){ return dbDel("r:" + id); }
+  function sameAsSaved(){
+    var s = state.cur && findHist(state.cur.id);
+    return !!s && JSON.stringify(Object.assign({}, s, { savedAt: 0 })) === JSON.stringify(Object.assign({}, state.cur, { savedAt: 0 }));
+  }
+  function isUnsaved(){ return !!state.cur && KT.hasContent(state.cur) && !sameAsSaved(); }
   document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "hidden") flush(); });
   window.addEventListener("pagehide", flush);
 
@@ -129,6 +151,7 @@
     var full = f.full ? " full" : "", h = '<div class="fi' + full + '"><label>' + esc(f.l) + "</label>";
     if(f.type === "chips") h += chips(path, f.opts, val);
     else if(f.type === "date") h += '<input type="date" data-p="' + path + '" value="' + esc(val) + '">';
+    else if(f.type === "num" && f.neg) h += '<div class="pm"><input inputmode="decimal" data-p="' + path + '" value="' + esc(val) + '"><button class="pmb" data-a="neg" data-v="' + path + '" aria-label="Vaihda etumerkki">±</button></div>';
     else if(f.type === "num") h += '<input inputmode="decimal" data-p="' + path + '" value="' + esc(val) + '" placeholder="' + esc(f.ph || "") + '">';
     else h += '<input data-p="' + path + '" value="' + esc(val) + '" placeholder="' + esc(f.ph || "") + '"' + (f.keep ? ' data-keep="' + f.k + '"' : "") + ">";
     return h + "</div>";
@@ -147,7 +170,7 @@
     if(n){
       h += '<div class="ph-list">';
       obj.photos.forEach(function(src, i){
-        h += '<div class="ph"><div class="th"><img src="' + src + '" alt=""><button class="x" data-delphoto="' + path + '" data-i="' + i + '" aria-label="Poista kuva">×</button></div>' +
+        h += '<div class="ph"><div class="th"><img src="' + esc(src) + '" alt=""><button class="x" data-delphoto="' + path + '" data-i="' + i + '" aria-label="Poista kuva">×</button></div>' +
           '<textarea class="cap" data-p="' + path + "/captions/" + i + '" rows="2" placeholder="Kuvateksti">' + esc(obj.captions[i] || "") + "</textarea></div>";
       });
       h += "</div>";
@@ -214,7 +237,7 @@
         s.roles.forEach(function(r){
           var x = c.sign[r[0]] || {};
           h += '<div class="sig"><label class="lbl">' + esc(r[1]) + "</label>" +
-            (x.img ? '<img class="sig-img" src="' + x.img + '" alt="Allekirjoitus">' : '<canvas class="sig-pad" data-sig="' + r[0] + '"></canvas><div class="muted small">Allekirjoita sormella yllä olevaan kenttään.</div>') +
+            (x.img ? '<img class="sig-img" src="' + esc(x.img) + '" alt="Allekirjoitus">' : '<canvas class="sig-pad" data-sig="' + r[0] + '"></canvas><div class="muted small">Allekirjoita sormella yllä olevaan kenttään.</div>') +
             '<div class="row"><input data-p="sign/' + r[0] + '/name" value="' + esc(x.name || "") + '" placeholder="Nimenselvennys"><button class="link" data-a="clearsig" data-v="' + r[0] + '">Tyhjennä</button></div></div>';
         });
         h += "</section>";
@@ -256,7 +279,7 @@
   function renderReports(){
     if(state.view) return renderReportView();
     var h = "";
-    if(state.cur && KT.hasContent(state.cur)){
+    if(isUnsaved()){
       h += '<h3 class="lh">Kesken oleva</h3><div class="rcard"><div class="rmain" data-a="tab" data-v="tarkastus"><b>' + esc(state.cur.meta.osoite || "Osoite puuttuu") + "</b><small>" + esc(T[state.cur.tyyppi].name) + " · " + esc(KT.fmtDate(state.cur.meta.pvm)) + "</small></div>" +
         '<button class="btn sm" data-a="export" data-v="cur">Vie</button></div>';
     }
@@ -288,7 +311,7 @@
     function t(s){ return esc(s).replace(/\n/g, "<br>"); }
     return blocks.map(function(b){
       switch(b.t){
-        case "cover": return '<h1>' + t(b.title) + '</h1><div class="muted">' + t(b.subtitle) + "</div><h2>" + t(b.address) + "</h2>" + (b.photo ? '<img class="dcover" src="' + b.photo + '">' : "") +
+        case "cover": return '<h1>' + t(b.title) + '</h1><div class="muted">' + t(b.subtitle) + "</div><h2>" + t(b.address) + "</h2>" + (b.photo ? '<img class="dcover" src="' + esc(b.photo) + '">' : "") +
           '<table class="kv">' + b.kv.map(function(r){ return "<tr><td>" + t(r[0]) + "</td><td>" + t(r[1]) + "</td></tr>"; }).join("") + "</table>";
         case "toc": return "";
         case "h1": return '<h2 class="dh1">' + t(b.text) + "</h2>";
@@ -301,14 +324,14 @@
         case "table": return '<div class="tw"><table class="dt"><tr>' + b.head.map(function(x){ return "<th>" + t(x) + "</th>"; }).join("") + "</tr>" +
           b.rows.map(function(r){ return "<tr>" + r.map(function(x, i){ return "<td" + (b.status === i ? ' class="s-' + esc(x) + '"' : "") + ">" + t(x) + "</td>"; }).join("") + "</tr>"; }).join("") +
           (b.foot ? "<tr class=\"foot\">" + b.foot.map(function(x){ return "<td>" + t(x) + "</td>"; }).join("") + "</tr>" : "") + "</table></div>";
-        case "photos": return '<div class="dph">' + b.items.map(function(it){ return '<figure><img src="' + it.src + '"><figcaption>' + t(it.cap) + "</figcaption></figure>"; }).join("") + "</div>";
-        case "sign": return '<div class="dsign"><div>' + t((b.place ? b.place + ", " : "") + (b.date || "")) + "</div>" + b.parties.map(function(p){ return '<div class="dsp">' + (p.img ? '<img src="' + p.img + '">' : '<div class="sp"></div>') + "<b>" + t(p.name || "Nimenselvennys") + "</b><div class=\"muted\">" + t(p.role) + "</div></div>"; }).join("") + "</div>";
+        case "photos": return '<div class="dph">' + b.items.map(function(it){ return '<figure><img src="' + esc(it.src) + '"><figcaption>' + t(it.cap) + "</figcaption></figure>"; }).join("") + "</div>";
+        case "sign": return '<div class="dsign"><div>' + t((b.place ? b.place + ", " : "") + (b.date || "")) + "</div>" + b.parties.map(function(p){ return '<div class="dsp">' + (p.img ? '<img src="' + esc(p.img) + '">' : '<div class="sp"></div>') + "<b>" + t(p.name || "Nimenselvennys") + "</b><div class=\"muted\">" + t(p.role) + "</div></div>"; }).join("") + "</div>";
         default: return "";
       }
     }).join("");
   }
   function renderHelp(){
-    return '<div class="rv-top"><button class="link" data-a="tab" data-v="' + (state.cur ? "tarkastus" : "tarkastus") + '">‹ Takaisin</button></div><article class="doc helpdoc">' +
+    return '<div class="rv-top"><button class="link" data-a="tab" data-v="tarkastus">‹ Takaisin</button></div><article class="doc helpdoc">' +
       "<h1>Ohje</h1><p class=\"muted\">" + esc(KT.APP_NAME) + " · versio " + esc(KT.APP_VERSION) + "</p>" +
       "<h3>Tiedot pysyvät tässä laitteessa</h3><p>Sovellus ei lähetä mitään internetiin. Kaikki teksti ja kuvat tallentuvat automaattisesti tämän selaimen muistiin heti kirjoittaessa. Jos selaimen sivustotiedot tyhjennetään, tarkastukset poistuvat – vie siis tärkeät raportit talteen.</p>" +
       "<h3>Kotivalikkoon</h3><p>iPhone: Safari → Jaa → <b>Lisää Koti-valikkoon</b>. Android: Chrome → ⋮ → <b>Lisää aloitusnäytölle</b>. Kun sovellus on kerran avattu, se toimii myös ilman verkkoyhteyttä.</p>" +
@@ -337,7 +360,7 @@
     var copy = KT.clone(state.cur); copy.savedAt = Date.now();
     var idx = -1; state.history.forEach(function(h, i){ if(h.id === copy.id) idx = i; });
     if(idx > -1) state.history[idx] = copy; else state.history.push(copy);
-    saveHistory().then(function(ok){ render(); openExport(copy, ok ? "Raportti tallennettu" : "Tallennus epäonnistui – vie tiedosto nyt"); });
+    saveRep(copy).then(function(ok){ render(); openExport(copy, ok ? "Raportti tallennettu" : "Tallennus epäonnistui – vie tiedosto nyt"); });
   }
   function canShareFiles(){
     try { return !!(navigator.canShare && navigator.canShare({ files: [new File(["x"], "x.pdf", { type: "application/pdf" })] })); } catch(e){ return false; }
@@ -363,17 +386,14 @@
     setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 4000);
     toast("Tallennettu: " + f.name);
   }
+  /* Tiedosto tehdään heti napautuksen aikana: jakovalikko (iOS) vaatii, että se avataan suoraan käyttäjän napautuksesta */
   function deliver(insp, fmt, mode){
-    busy("Tehdään tiedostoa…");
-    setTimeout(function(){
-      var f;
-      try { f = makeFile(insp, fmt); } catch(e){ console.error(e); busy(null); notify("Tiedoston teko epäonnistui: " + e.message); return; }
-      busy(null);
-      if(mode === "share" && canShareFiles()){
-        var file = new File([f.blob], f.name, { type: f.mime });
-        navigator.share({ files: [file], title: f.name }).catch(function(e){ if(e && e.name !== "AbortError") download(f); });
-      } else download(f);
-    }, 30);
+    var f;
+    try { f = makeFile(insp, fmt); } catch(e){ console.error(e); notify("Tiedoston teko epäonnistui: " + e.message); return; }
+    if(mode === "share" && canShareFiles()){
+      var file = new File([f.blob], f.name, { type: f.mime });
+      navigator.share({ files: [file], title: f.name }).catch(function(e){ if(e && e.name !== "AbortError") download(f); });
+    } else download(f);
   }
   function openExport(insp, title){
     closeSheet();
@@ -416,8 +436,10 @@
     list.forEach(function(f){ chain = chain.then(function(){ return readPhoto(f).then(function(d){ obj.photos.push(d); obj.captions.push(""); }).catch(function(){ fail++; }); }); });
     chain.then(function(){
       busy(null); saveCur(); render();
-      if(skipped > 0) notify(skipped + " kuvaa jätettiin pois: kohtaan mahtuu enintään " + KT.MAX_PHOTOS + " kuvaa.");
-      if(fail) notify(fail + " kuvaa ei voitu lukea.");
+      var msgs = [];
+      if(skipped > 0) msgs.push(skipped + " kuvaa jätettiin pois: kohtaan mahtuu enintään " + KT.MAX_PHOTOS + " kuvaa.");
+      if(fail) msgs.push(fail + " kuvaa ei voitu lukea.");
+      if(msgs.length) notify(msgs.join("\n\n"));
     });
   }
   function importFile(file){
@@ -429,7 +451,7 @@
         if(ex && !(await ask("Raportti \"" + (insp.meta.osoite || "") + "\" on jo listassa. Korvataanko se?", "Korvaa", "Tuo kopiona"))) insp.id = KT.uid();
         insp.savedAt = Date.now();
         state.history = state.history.filter(function(h){ return h.id !== insp.id; }).concat([insp]);
-        saveHistory().then(function(){ render(); toast("Tuotu: " + (insp.meta.osoite || "raportti")); });
+        saveRep(insp).then(function(){ render(); toast("Tuotu: " + (insp.meta.osoite || "raportti")); });
       } catch(e){ notify(e.message || "Tiedostoa ei voitu lukea."); }
     };
     rd.readAsText(file);
@@ -493,8 +515,7 @@
     else if(a === "pick") startNew(v);
     else if(a === "new"){
       flush();
-      var saved = findHist(state.cur.id);
-      var unsaved = KT.hasContent(state.cur) && (!saved || JSON.stringify(Object.assign({}, saved, { savedAt: 0 })) !== JSON.stringify(Object.assign({}, state.cur, { savedAt: 0 })));
+      var unsaved = isUnsaved();
       if(unsaved && !(await ask("Aloitetaanko uusi tarkastus?\n\nKesken olevaa ei ole tallennettu raportiksi, ja se poistuu.", "Aloita uusi"))) return;
       state.cur = null; dbSet("current", null); state.tab = "tarkastus"; render(); window.scrollTo(0, 0);
     }
@@ -517,6 +538,11 @@
       if(!state.cur.havainnot.length) state.cur.havainnot.push(KT.blankHav());
       saveCur(); render();
     }
+    else if(a === "neg"){
+      var nr = ref(v), nv = String(nr.o[nr.k] || "").trim().replace(/^−/, "-");
+      nr.o[nr.k] = nv.charAt(0) === "-" ? nv.slice(1) : "-" + nv;
+      saveCur(); render();
+    }
     else if(a === "addrow"){ state.cur.mittaukset[v].push({}); saveCur(); render(); }
     else if(a === "delrow"){
       var rows = state.cur.mittaukset[v], ix = +b.getAttribute("data-i");
@@ -529,7 +555,7 @@
     else if(a === "back"){ state.view = null; render(); }
     else if(a === "edit"){
       var rp = findHist(v); if(!rp) return;
-      if(state.cur && state.cur.id !== rp.id && KT.hasContent(state.cur) && !findHist(state.cur.id) &&
+      if(state.cur && state.cur.id !== rp.id && isUnsaved() &&
          !(await ask("Kesken olevaa tarkastusta ei ole tallennettu raportiksi. Korvataanko se tällä raportilla?", "Korvaa"))) return;
       state.cur = KT.normalize(KT.clone(rp)); delete state.cur.savedAt;
       saveCur(); state.view = null; state.tab = "tarkastus"; render(); window.scrollTo(0, 0);
@@ -537,7 +563,7 @@
     else if(a === "delrep"){
       var rr = findHist(v); if(!rr) return;
       if(!(await ask("Poistetaanko raportti \"" + (rr.meta.osoite || "") + "\" pysyvästi?", "Poista"))) return;
-      state.history = state.history.filter(function(x){ return x.id !== v; }); state.view = null; saveHistory(); render();
+      state.history = state.history.filter(function(x){ return x.id !== v; }); state.view = null; delRep(v); render();
     }
   });
   function focusTitle(id){ var el = app.querySelector('[data-title="' + id + '"]'); if(el){ el.focus(); el.scrollIntoView({ block: "center" }); } }
@@ -545,13 +571,21 @@
   /* ---------------- käynnistys ---------------- */
   idbOpen().then(function(db){
     idb = db;
-    return Promise.all([dbGet("current"), dbGet("history"), dbGet("remembered")]);
+    return Promise.all([dbGet("current"), dbGet("remembered"), dbKeys(), dbGet("history")]);
   }).then(function(v){
-    state.cur = v[0] ? KT.normalize(v[0]) : null;
-    state.history = (v[1] || []).map(KT.normalize);
-    state.remembered = v[2] || {};
-    render();
-  });
+    function safe(x){ try { return x ? KT.normalize(x) : null; } catch(e){ console.error(e); return null; } }
+    state.cur = safe(v[0]);
+    state.remembered = (v[1] && typeof v[1] === "object") ? v[1] : {};
+    var keys = v[2].filter(function(k){ return typeof k === "string" && k.indexOf("r:") === 0; });
+    return Promise.all(keys.map(dbGet)).then(function(reps){
+      state.history = reps.map(safe).filter(Boolean);
+      /* Version 1.0 tallennus (kaikki raportit yhdessä) siirretään uuteen muotoon */
+      var old = (Array.isArray(v[3]) ? v[3] : []).map(safe).filter(Boolean).filter(function(r){ return !findHist(r.id); });
+      if(!old.length) return;
+      state.history = state.history.concat(old);
+      return Promise.all(old.map(saveRep)).then(function(oks){ if(oks.every(Boolean)) return dbDel("history"); });
+    });
+  }).then(render);
   try { if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
   try {
     if("serviceWorker" in navigator && /^https?:$/.test(location.protocol) && window.self === window.top)

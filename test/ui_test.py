@@ -8,7 +8,7 @@ async def main():
         pg = await ctx.new_page()
         errs=[]; pg.on('console', lambda m: errs.append(m.text) if m.type in ('error','warning') else None); pg.on('pageerror', lambda e: errs.append('PAGEERR '+str(e)))
         pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
-        await pg.goto('http://localhost:8765/'); await pg.wait_for_timeout(600)
+        await pg.goto('http://localhost:8766/'); await pg.wait_for_timeout(600)
         await pg.screenshot(path=OUT+'/1-valinta.png')
         for typ in ['kunto','osto','muutto']:
             await pg.click(f'[data-a=pick][data-v={typ}]'); await pg.wait_for_timeout(200)
@@ -45,7 +45,7 @@ async def main():
         await pg.click('.rmain >> nth=0'); await pg.wait_for_timeout(300)
         await pg.screenshot(path=OUT+'/6-esikatselu.png', full_page=True)
         await pg.click('[data-a=back]'); await pg.wait_for_timeout(100)
-        await pg.set_input_files('[data-import]', '/home/claude/app/test/out/kmu.json') if os.path.exists('/home/claude/app/test/out/kmu.json') else None
+        await pg.set_input_files('[data-import]', 'test/out/kmu.json') if os.path.exists('test/out/kmu.json') else None
         await pg.wait_for_timeout(300)
         print('reports', await pg.locator('.rmain').count())
         await pg.click('[data-a=tab][data-v=ohje]'); await pg.screenshot(path=OUT+'/7-ohje.png')
